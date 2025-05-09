@@ -20,5 +20,6 @@ int loadBunnies(Bunny *bunnies);
 void saveBunnies(Bunny *bunnies, int count);
 void announceWinner();
 void countBunnies();
+void startWatering();
 
 #endif

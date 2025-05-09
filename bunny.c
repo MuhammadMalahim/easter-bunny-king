@@ -1,8 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <time.h>
 #include "bunny.h"
 
+void handle_bunny_arrival(int sig) {
+    printf("Chief Bunny: A bunny has arrived for watering!\n");
+}
 
 void trim_newline(char *str) {
     str[strcspn(str, "\n")] = '\0';
@@ -179,4 +187,67 @@ void countBunnies() {
     Bunny bunnies[100];
     int count = loadBunnies(bunnies);
     printf("\nTotal number of bunnies registered so far: %d\n", count);
+}
+
+void startWatering() {
+    Bunny bunnies[100];
+    int count = loadBunnies(bunnies);
+    if (count == 0) {
+        printf("No bunnies are registered yet.\n");
+        return;
+    }
+
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("pipe failed");
+        exit(1);
+    }
+
+    signal(SIGUSR1, handle_bunny_arrival);
+
+    printf("\n--- Watering begins! ---\n");
+
+    for (int i = 0; i < count; i++) {
+        pid_t pid = fork();
+
+        if (pid < 0) {
+            perror("fork failed");
+            exit(1);
+        }
+        // Child process
+        else if (pid == 0) {
+            kill(getppid(), SIGUSR1);
+
+            printf("\nBunny: %s is reciting poem:\n\"%s\"\n", bunnies[i].name, bunnies[i].poem);
+
+            srand(time(NULL) ^ (getpid() << 16));
+            int eggs = (rand() % 20) + 1;
+
+            printf("Bunny: %s received %d red eggs!\n", bunnies[i].name, eggs);
+
+            close(pipefd[0]);
+            write(pipefd[1], &eggs, sizeof(int));
+            close(pipefd[1]);
+
+            exit(0);
+        }
+        
+    }
+
+    // Parent process
+    close(pipefd[1]);
+
+    for (int i = 0; i < count; i++) {
+        int eggs;
+        read(pipefd[0], &eggs, sizeof(int));
+        bunnies[i].red_eggs_count = eggs;
+        wait(NULL); 
+    }
+
+    close(pipefd[0]);
+
+    saveBunnies(bunnies, count);
+
+    printf("\n--- Watering complete ---\n");
+    announceWinner();
 }

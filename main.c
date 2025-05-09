@@ -13,7 +13,8 @@ int main()
         printf("4. Set Red Eggs Count\n");
         printf("5. Delete Bunny\n");
         printf("6. Announce Winner\n");
-        printf("7. Exit\n");
+        printf("7. Start Watering (Easter Monday)\n");
+        printf("8. Exit\n");
         printf("Choose an option: ");
         scanf("%d", &choice);
         getchar();
@@ -39,6 +40,9 @@ int main()
             announceWinner();
             break;
         case 7:
+            startWatering();
+            break;
+        case 8:
             printf("Goodbye!\n");
             break;
         default:
