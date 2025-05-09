@@ -13,7 +13,7 @@ int main()
         printf("4. Set Red Eggs Count\n");
         printf("5. Delete Bunny\n");
         printf("6. Announce Winner\n");
-        printf("7. Start Watering (Easter Monday)\n");
+        printf("7. Start Watering\n");
         printf("8. Exit\n");
         printf("Choose an option: ");
         scanf("%d", &choice);
@@ -49,7 +49,7 @@ int main()
             printf("Invalid choice. Please try again.\n");
             break;
         }
-    } while (choice != 7);
+    } while (choice != 8);
 
     return 0;
 }

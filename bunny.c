@@ -5,12 +5,13 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include <time.h>
 #include "bunny.h"
+#include <errno.h>
+#include <string.h>
 
-void handle_bunny_arrival(int sig) {
-    printf("Chief Bunny: A bunny has arrived for watering!\n");
-}
 
 void trim_newline(char *str) {
     str[strcspn(str, "\n")] = '\0';
@@ -189,6 +190,12 @@ void countBunnies() {
     printf("\nTotal number of bunnies registered so far: %d\n", count);
 }
 
+void sig_handler(int signo) {
+    if (signo == SIGUSR1) {
+        printf("Chief Bunny: A bunny has arrived for watering!\n");
+    }
+}
+
 void startWatering() {
     Bunny bunnies[100];
     int count = loadBunnies(bunnies);
@@ -197,57 +204,90 @@ void startWatering() {
         return;
     }
 
-    int pipefd[2];
-    if (pipe(pipefd) == -1) {
-        perror("pipe failed");
-        exit(1);
+    // Generate message queue key and create queue
+    key_t key = ftok(MSG_KEY_PATH, MSG_KEY_ID);
+    if (key == -1) {
+        perror("ftok failed");
+        return;
     }
 
-    signal(SIGUSR1, handle_bunny_arrival);
+    int msqid = msgget(key, 0666 | IPC_CREAT);
+    if (msqid == -1) {
+        perror("msgget failed");
+        return;
+    }
 
-    printf("\n--- Watering begins! ---\n");
+    // Set up signal handler for SIGUSR1
+    struct sigaction sa;
+    sa.sa_handler = sig_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGUSR1, &sa, NULL);
 
+    printf("\n--- Watering Begins! ---\n");
+
+    // Forking child processes for each bunny
     for (int i = 0; i < count; i++) {
         pid_t pid = fork();
-
         if (pid < 0) {
-            perror("fork failed");
+            perror("fork");
             exit(1);
+        } else if (pid == 0) {
+            // Child process: Bunny boy's actions
+            sleep(1);  // Give time for the parent to set up signal handling
+            kill(getppid(), SIGUSR1);  // Notify the Chief Bunny that the bunny boy has arrived
+            sleep(1);
+
+            printf("\n%s recites: \"%s\"\n", bunnies[i].name, bunnies[i].poem);
+
+            srand(time(NULL) + getpid());  // Seed the random number generator with a unique seed
+            int eggs = rand() % 20 + 1;  // Random number between 1 and 20
+            printf("%s received %d red eggs!\n", bunnies[i].name, eggs);
+
+            // Prepare message to send to the Chief Bunny
+            EggMessage msg;
+            msg.mtype = 1;
+            msg.index = i;
+            msg.eggs = eggs;
+
+            if (msgsnd(msqid, &msg, sizeof(EggMessage) - sizeof(long), 0) == -1) {
+                perror("msgsnd failed");
+            }
+
+            exit(0);  // Child process ends after sending the message
         }
-        // Child process
-        else if (pid == 0) {
-            kill(getppid(), SIGUSR1);
-
-            printf("\nBunny: %s is reciting poem:\n\"%s\"\n", bunnies[i].name, bunnies[i].poem);
-
-            srand(time(NULL) ^ (getpid() << 16));
-            int eggs = (rand() % 20) + 1;
-
-            printf("Bunny: %s received %d red eggs!\n", bunnies[i].name, eggs);
-
-            close(pipefd[0]);
-            write(pipefd[1], &eggs, sizeof(int));
-            close(pipefd[1]);
-
-            exit(0);
-        }
-        
     }
 
-    // Parent process
-    close(pipefd[1]);
+    // Parent process: Chief Bunny's actions
 
+    // Receiving messages from each child and updating bunny data
     for (int i = 0; i < count; i++) {
-        int eggs;
-        read(pipefd[0], &eggs, sizeof(int));
-        bunnies[i].red_eggs_count = eggs;
-        wait(NULL); 
+        EggMessage msg;
+        while (1) {
+            if (msgrcv(msqid, &msg, sizeof(EggMessage) - sizeof(long), 1, 0) == -1) {
+                if (errno == EINTR) {
+                    continue; // Retry if interrupted by signal
+                } else {
+                    perror("msgrcv failed");
+                    break;
+                }
+            } else {
+                bunnies[msg.index].red_eggs_count = msg.eggs;  // Update bunny's red eggs count
+                break;
+            }
+        }
+
+        // Wait for the child process to finish before moving to the next one
+        waitpid(-1, NULL, 0);
     }
 
-    close(pipefd[0]);
-
-    saveBunnies(bunnies, count);
-
-    printf("\n--- Watering complete ---\n");
+    // Announce the Easter Bunny King
     announceWinner();
+
+    // Remove the message queue
+    msgctl(msqid, IPC_RMID, NULL);
+
+    printf("\n--- Watering Finished ---\n");
+    saveBunnies(bunnies, count);  // Save updated bunny data
+    announceWinner();  // Announce the winner based on red eggs count
 }
